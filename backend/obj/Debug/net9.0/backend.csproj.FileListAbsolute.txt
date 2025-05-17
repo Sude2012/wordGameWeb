@@ -83,3 +83,4 @@
 /Users/selversude/Desktop/wordGameWeb/backend/bin/Debug/net9.0/runtimes/win/lib/net9.0/System.Diagnostics.EventLog.Messages.dll
 /Users/selversude/Desktop/wordGameWeb/backend/bin/Debug/net9.0/runtimes/win/lib/net9.0/System.Diagnostics.EventLog.dll
 /Users/selversude/Desktop/wordGameWeb/backend/bin/Debug/net9.0/runtimes/win/lib/net9.0/System.Security.Cryptography.Pkcs.dll
+/Users/selversude/Desktop/wordGameWeb/backend/obj/Debug/net9.0/backend.sourcelink.json

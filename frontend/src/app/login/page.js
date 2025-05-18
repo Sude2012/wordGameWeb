@@ -2,17 +2,29 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation"; // ⭐️ yönlendirme için eklendi
+import { useRouter } from "next/navigation";
 
 const LoginPage = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const router = useRouter(); // ⭐️ yönlendirme hook'u
+  const router = useRouter();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // ⭐️ Admin kontrolü ÖNCE
+    if (
+      email.trim().toLowerCase() === "admin@wordplay.com" &&
+      password.trim() === "admin1234"
+    ) {
+      // admin giriş başarılı
+      console.log("Admin olarak giriş yapıldı");
+      router.push("/add-word");
+      return;
+    }
+
+    // 👤 Normal kullanıcı girişi
     const response = await fetch("http://localhost:5278/api/login", {
       method: "POST",
       headers: {
@@ -27,7 +39,7 @@ const LoginPage = () => {
     if (response.ok) {
       const data = await response.json();
       console.log("Giriş başarılı:", data);
-      router.push("/dashboard"); // ⭐️ Giriş başarılıysa oyun sayfasına yönlendir
+      router.push("/dashboard");
     } else if (response.status === 401) {
       setErrorMessage("Geçersiz e-posta veya şifre");
     } else {

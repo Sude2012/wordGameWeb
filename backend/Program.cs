@@ -133,21 +133,48 @@ app.MapGet("/api/words", async (HttpContext context) =>
 });
 
 // === WORD POST ===
-app.MapPost("/api/addword", async (WordDto data, HttpContext context) =>
+app.MapPost("/api/add-full-word", async (NewWordRequest request, IConfiguration configuration) =>
 {
-    if (data == null)
-        return Results.BadRequest(new { message = "Geçersiz veri." });
-
     var connectionString = configuration.GetConnectionString("DefaultConnection");
-    using var conn = new SqlConnection(connectionString);
-    var cmd = new SqlCommand("INSERT INTO Words (Text, Translation, UserId) VALUES (@text, @translation, @userId)", conn);
-    cmd.Parameters.AddWithValue("@text", data.Text);
-    cmd.Parameters.AddWithValue("@translation", data.Translation);
-    cmd.Parameters.AddWithValue("@userId", data.UserId);
 
+    using var conn = new SqlConnection(connectionString);
     await conn.OpenAsync();
-    await cmd.ExecuteNonQueryAsync();
-    return Results.Ok(new { message = "Kelime eklendi." });
+
+    var transaction = conn.BeginTransaction();
+
+    try
+    {
+        // 1. Words tablosuna ekle
+        var wordCmd = new SqlCommand(@"
+            INSERT INTO Words (EngWordName, TurWordName, Picture, Pronunciation, UserId) 
+            OUTPUT INSERTED.WordID
+            VALUES (@eng, @tur, @pic, @pron, @userId)", conn, transaction);
+
+        wordCmd.Parameters.AddWithValue("@eng", request.EngWordName);
+        wordCmd.Parameters.AddWithValue("@tur", request.TurWordName);
+        wordCmd.Parameters.AddWithValue("@pic", request.Picture);
+        wordCmd.Parameters.AddWithValue("@pron", request.Pronunciation ?? (object)DBNull.Value);
+        wordCmd.Parameters.AddWithValue("@userId", request.UserId);
+
+        int wordId = (int)await wordCmd.ExecuteScalarAsync();
+
+        // 2. WordSamples tablosuna örnek cümleleri ekle
+        foreach (var sample in request.Samples)
+        {
+            var sampleCmd = new SqlCommand("INSERT INTO WordSamples (WordID, SampleText) VALUES (@wordId, @text)", conn, transaction);
+            sampleCmd.Parameters.AddWithValue("@wordId", wordId);
+            sampleCmd.Parameters.AddWithValue("@text", sample);
+            await sampleCmd.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
+        return Results.Ok(new { message = "Kelime ve örnek cümleler başarıyla eklendi." });
+    }
+    catch (Exception ex)
+    {
+        await transaction.RollbackAsync();
+        return Results.BadRequest(new { message = $"Hata: {ex.Message}" });
+    }
 });
 
 // === WORD PROGRESS GET ===
@@ -173,6 +200,53 @@ app.MapGet("/api/word-progress", async (HttpContext context) =>
 
     return Results.Ok(wordList);
 });
+
+app.MapPost("/api/NewWordRequest", async (HttpContext context) =>
+{
+    try
+    {
+        var request = await context.Request.ReadFromJsonAsync<NewWordRequest>();
+        if (request is null)
+        {
+            return Results.BadRequest(new { message = "Veri okunamadı." });
+        }
+
+        using var connection = new SqlConnection(configuration.GetConnectionString("DefaultConnection"));
+        await connection.OpenAsync();
+
+        var command = new SqlCommand(@"
+            INSERT INTO Words (EngWordName, TurWordName, Picture, Pronunciation, UserId)
+            OUTPUT INSERTED.Id
+            VALUES (@eng, @tur, @pic, @pron, @uid)", connection);
+
+        command.Parameters.AddWithValue("@eng", request.EngWordName);
+        command.Parameters.AddWithValue("@tur", request.TurWordName);
+        command.Parameters.AddWithValue("@pic", request.Picture ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("@pron", request.Pronunciation ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("@uid", request.UserId);
+
+        var wordId = (int)await command.ExecuteScalarAsync();
+
+        // Örnek cümleleri ekle
+        foreach (var sample in request.Samples.Where(s => !string.IsNullOrWhiteSpace(s)))
+        {
+            var sampleCmd = new SqlCommand(@"
+                INSERT INTO WordSamples (WordId, SampleText)
+                VALUES (@wordId, @sample)", connection);
+
+            sampleCmd.Parameters.AddWithValue("@wordId", wordId);
+            sampleCmd.Parameters.AddWithValue("@sample", sample);
+            await sampleCmd.ExecuteNonQueryAsync();
+        }
+
+        return Results.Ok(new { message = "Kelime başarıyla eklendi!" });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem("Sunucu hatası: " + ex.Message);
+    }
+});
+
 
 app.Run();
 
@@ -205,4 +279,13 @@ public class WordProgress
     public string Word { get; set; } = string.Empty;
     public int CorrectCount { get; set; }
     public DateTime LastCorrectDate { get; set; }
+}
+public class NewWordRequest
+{
+    public string EngWordName { get; set; }
+    public string TurWordName { get; set; }
+    public string Picture { get; set; }
+    public string? Pronunciation { get; set; }
+    public List<string> Samples { get; set; }
+    public int UserId { get; set; }
 }

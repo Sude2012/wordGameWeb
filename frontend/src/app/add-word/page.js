@@ -125,7 +125,7 @@ export default function AddWordForm() {
       </form>
 
       <div className="saved-words">
-        <h3>Eklenen Kelimeler</h3>
+        <h3>Yeni Eklenen Kelimeler</h3>
         {savedWords.length === 0 && <p>Henüz kelime eklenmedi.</p>}
         <ul>
           {savedWords.map((w, i) => (

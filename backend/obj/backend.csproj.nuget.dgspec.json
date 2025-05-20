@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "/Users/selversude/Desktop/wordGameWeb/backend/backend.csproj": {}
+    "/Users/selversude/Desktop/wordGameWeb/wordGameWeb/backend/backend.csproj": {}
   },
   "projects": {
-    "/Users/selversude/Desktop/wordGameWeb/backend/backend.csproj": {
+    "/Users/selversude/Desktop/wordGameWeb/wordGameWeb/backend/backend.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "/Users/selversude/Desktop/wordGameWeb/backend/backend.csproj",
+        "projectUniqueName": "/Users/selversude/Desktop/wordGameWeb/wordGameWeb/backend/backend.csproj",
         "projectName": "backend",
-        "projectPath": "/Users/selversude/Desktop/wordGameWeb/backend/backend.csproj",
+        "projectPath": "/Users/selversude/Desktop/wordGameWeb/wordGameWeb/backend/backend.csproj",
         "packagesPath": "/Users/selversude/.nuget/packages/",
-        "outputPath": "/Users/selversude/Desktop/wordGameWeb/backend/obj/",
+        "outputPath": "/Users/selversude/Desktop/wordGameWeb/wordGameWeb/backend/obj/",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "/Users/selversude/.nuget/NuGet/NuGet.Config"

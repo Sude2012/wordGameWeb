@@ -115,18 +115,36 @@ app.MapGet("/api/words", async (HttpContext context) =>
     var words = new List<object>();
 
     using var conn = new SqlConnection(connectionString);
-    var cmd = new SqlCommand("SELECT * FROM Words WHERE UserId = 1", conn); // Şimdilik sabit kullanıcı
     await conn.OpenAsync();
+    
+    // Ana kelime bilgilerini al
+    var cmd = new SqlCommand("SELECT * FROM Words WHERE UserId = 1", conn);
     var reader = await cmd.ExecuteReaderAsync();
 
     while (await reader.ReadAsync())
     {
-        words.Add(new
+        var wordId = reader["WordID"];
+        var word = new
         {
-            Id = reader["Id"],
-            Text = reader["Text"].ToString(),
-            Translation = reader["Translation"].ToString()
-        });
+            Id = wordId,
+            Text = reader["EngWordName"].ToString(),
+            Translation = reader["TurWordName"].ToString(),
+            Picture = reader["Picture"].ToString(),
+            Samples = new List<string>()
+        };
+
+        // Örnek cümleleri almak için ikinci bir sorgu
+        using var sampleCmd = new SqlCommand("SELECT SampleText FROM WordSamples WHERE WordID = @wordId", conn);
+        sampleCmd.Parameters.AddWithValue("@wordId", wordId);
+        
+        using var sampleReader = await sampleCmd.ExecuteReaderAsync();
+        while (await sampleReader.ReadAsync())
+        {
+            word.Samples.Add(sampleReader["SampleText"].ToString());
+        }
+        await sampleReader.CloseAsync();
+
+        words.Add(word);
     }
 
     return Results.Ok(words);
@@ -177,26 +195,38 @@ app.MapPost("/api/add-full-word", async (NewWordRequest request, IConfiguration 
     }
 });
 
+
 // === WORD PROGRESS GET ===
 app.MapGet("/api/word-progress", async (HttpContext context) =>
 {
     using var connection = new SqlConnection(configuration.GetConnectionString("DefaultConnection"));
     await connection.OpenAsync();
 
-    var command = new SqlCommand("SELECT * FROM WordProgress", connection);
-    var reader = await command.ExecuteReaderAsync();
+    var command = new SqlCommand("SELECT Id, Word, CorrectCount, LastCorrectDate FROM WordProgress", connection);
+var reader = await command.ExecuteReaderAsync();
 
-    var wordList = new List<WordProgress>();
-    while (await reader.ReadAsync())
+if (!reader.HasRows)
+{
+    return Results.NotFound(new { message = "Kayıt bulunamadı." });
+}
+
+// Hangi kolonlar geliyor bakalım:
+for (int i = 0; i < reader.FieldCount; i++)
+{
+    Console.WriteLine($"Column {i}: {reader.GetName(i)}");
+}
+
+var wordList = new List<WordProgress>();
+while (await reader.ReadAsync())
+{
+    wordList.Add(new WordProgress
     {
-        wordList.Add(new WordProgress
-        {
-            Id = reader.GetInt32(0),
-            Word = reader.GetString(1),
-            CorrectCount = reader.GetInt32(2),
-            LastCorrectDate = reader.GetDateTime(3)
-        });
-    }
+        Id = reader.GetInt32(reader.GetOrdinal("Id")),
+        Word = reader.GetString(reader.GetOrdinal("Word")),
+        CorrectCount = reader.GetInt32(reader.GetOrdinal("CorrectCount")),
+        LastCorrectDate = reader.GetDateTime(reader.GetOrdinal("LastCorrectDate"))
+    });
+}
 
     return Results.Ok(wordList);
 });
@@ -246,6 +276,9 @@ app.MapPost("/api/NewWordRequest", async (HttpContext context) =>
         return Results.Problem("Sunucu hatası: " + ex.Message);
     }
 });
+
+
+
 
 
 app.Run();

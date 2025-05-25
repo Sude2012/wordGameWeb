@@ -25,7 +25,6 @@ export default function DashboardPage() {
     transition: "all 0.3s ease-in-out",
   };
 
-  // Hover efektini kontrol için state kullanalım
   const [hovered, setHovered] = useState(null);
 
   const containerStyle = {
@@ -54,7 +53,7 @@ export default function DashboardPage() {
 
   const buttons = [
     { href: "/quiz", label: "🎮 Teste Başla", id: 1 },
-    { href: "/dashboard/words", label: "⚙️ Ayarlar", id: 2 },
+    { href: "/dashboard/settings", label: "⚙️ Ayarlar", id: 2 }, // 🔁 YÖNLENDİRME DÜZELTİLDİ
   ];
 
   return (
@@ -76,8 +75,7 @@ export default function DashboardPage() {
             <button
               style={{
                 ...buttonBaseStyle,
-                backgroundColor:
-                  hovered === id ? "#15803d" /* hover yeşili */ : "#16a34a",
+                backgroundColor: hovered === id ? "#15803d" : "#16a34a",
                 transform: hovered === id ? "scale(1.1)" : "scale(1)",
               }}
               onMouseEnter={() => setHovered(id)}

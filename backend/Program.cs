@@ -4,8 +4,7 @@ using Microsoft.OpenApi.Models;
 using System.Net;
 using BCrypt.Net;
 
-// TLS protokolü güncellemesi
-System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+// TLS protokolü güncellemesi kaldırıldı (artık gerekli değil)
 
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
@@ -22,7 +21,7 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy.WithOrigins("http://localhost:3000")
+        policy.WithOrigins("http://localhost:3000", "http://127.0.0.1:3000")
               .AllowAnyHeader()
               .AllowAnyMethod();
     });
@@ -112,18 +111,20 @@ app.MapPost("/api/login", async (LoginRequest request) =>
 app.MapGet("/api/words", async (HttpContext context) =>
 {
     var connectionString = configuration.GetConnectionString("DefaultConnection");
-    var words = new List<object>();
+    var words = new List<dynamic>();
 
     using var conn = new SqlConnection(connectionString);
     await conn.OpenAsync();
-    
-    // Ana kelime bilgilerini al
-    var cmd = new SqlCommand("SELECT * FROM Words WHERE UserId = 1", conn);
-    var reader = await cmd.ExecuteReaderAsync();
+
+    // Ana kelimeleri al
+    var cmdWords = new SqlCommand("SELECT WordID, EngWordName, TurWordName, Picture FROM Words WHERE UserId = 1", conn);
+    var reader = await cmdWords.ExecuteReaderAsync();
+
+    var wordDict = new Dictionary<int, dynamic>();
 
     while (await reader.ReadAsync())
     {
-        var wordId = reader["WordID"];
+        var wordId = (int)reader["WordID"];
         var word = new
         {
             Id = wordId,
@@ -132,20 +133,26 @@ app.MapGet("/api/words", async (HttpContext context) =>
             Picture = reader["Picture"].ToString(),
             Samples = new List<string>()
         };
-
-        // Örnek cümleleri almak için ikinci bir sorgu
-        using var sampleCmd = new SqlCommand("SELECT SampleText FROM WordSamples WHERE WordID = @wordId", conn);
-        sampleCmd.Parameters.AddWithValue("@wordId", wordId);
-        
-        using var sampleReader = await sampleCmd.ExecuteReaderAsync();
-        while (await sampleReader.ReadAsync())
-        {
-            word.Samples.Add(sampleReader["SampleText"].ToString());
-        }
-        await sampleReader.CloseAsync();
-
-        words.Add(word);
+        wordDict.Add(wordId, word);
     }
+    await reader.CloseAsync();
+
+    // Tüm örnek cümleleri al (tek sorgu)
+    var cmdSamples = new SqlCommand("SELECT WordID, SampleText FROM WordSamples WHERE WordID IN (" + string.Join(",", wordDict.Keys) + ")", conn);
+    var sampleReader = await cmdSamples.ExecuteReaderAsync();
+
+    while (await sampleReader.ReadAsync())
+    {
+        var wordId = (int)sampleReader["WordID"];
+        var sampleText = sampleReader["SampleText"].ToString();
+        if (wordDict.ContainsKey(wordId))
+        {
+            wordDict[wordId].Samples.Add(sampleText);
+        }
+    }
+    await sampleReader.CloseAsync();
+
+    words = wordDict.Values.ToList();
 
     return Results.Ok(words);
 });
@@ -195,7 +202,6 @@ app.MapPost("/api/add-full-word", async (NewWordRequest request, IConfiguration 
     }
 });
 
-
 // === WORD PROGRESS GET ===
 app.MapGet("/api/word-progress", async (HttpContext context) =>
 {
@@ -203,122 +209,175 @@ app.MapGet("/api/word-progress", async (HttpContext context) =>
     await connection.OpenAsync();
 
     var command = new SqlCommand("SELECT Id, Word, CorrectCount, LastCorrectDate FROM WordProgress", connection);
-var reader = await command.ExecuteReaderAsync();
+    var reader = await command.ExecuteReaderAsync();
 
-if (!reader.HasRows)
-{
-    return Results.NotFound(new { message = "Kayıt bulunamadı." });
-}
-
-// Hangi kolonlar geliyor bakalım:
-for (int i = 0; i < reader.FieldCount; i++)
-{
-    Console.WriteLine($"Column {i}: {reader.GetName(i)}");
-}
-
-var wordList = new List<WordProgress>();
-while (await reader.ReadAsync())
-{
-    wordList.Add(new WordProgress
+    if (!reader.HasRows)
     {
-        Id = reader.GetInt32(reader.GetOrdinal("Id")),
-        Word = reader.GetString(reader.GetOrdinal("Word")),
-        CorrectCount = reader.GetInt32(reader.GetOrdinal("CorrectCount")),
-        LastCorrectDate = reader.GetDateTime(reader.GetOrdinal("LastCorrectDate"))
-    });
-}
+        return Results.NotFound(new { message = "Kayıt bulunamadı." });
+    }
+
+    var wordList = new List<WordProgress>();
+    while (await reader.ReadAsync())
+    {
+        wordList.Add(new WordProgress
+        {
+            Id = reader.GetInt32(reader.GetOrdinal("Id")),
+            Word = reader.GetString(reader.GetOrdinal("Word")),
+            CorrectCount = reader.GetInt32(reader.GetOrdinal("CorrectCount")),
+            LastCorrectDate = reader.GetDateTime(reader.GetOrdinal("LastCorrectDate"))
+        });
+    }
 
     return Results.Ok(wordList);
 });
 
-app.MapPost("/api/NewWordRequest", async (HttpContext context) =>
+// === 6 Adım Ezberleme Modülü ===
+
+// 1. Günlük yeni kelimeleri UserWords tablosuna ekle
+app.MapPost("/api/userwords/add-daily-new", async (AddDailyNewWordsRequest request) =>
 {
-    try
-    {
-        var request = await context.Request.ReadFromJsonAsync<NewWordRequest>();
-        if (request is null)
-        {
-            return Results.BadRequest(new { message = "Veri okunamadı." });
-        }
+    var connectionString = configuration.GetConnectionString("DefaultConnection");
 
-        using var connection = new SqlConnection(configuration.GetConnectionString("DefaultConnection"));
-        await connection.OpenAsync();
+    using var conn = new SqlConnection(connectionString);
+    await conn.OpenAsync();
 
-        var command = new SqlCommand(@"
-            INSERT INTO Words (EngWordName, TurWordName, Picture, Pronunciation, UserId)
-            OUTPUT INSERTED.Id
-            VALUES (@eng, @tur, @pic, @pron, @uid)", connection);
+    var query = @"
+        INSERT INTO UserWords (UserId, WordId, CorrectStreak, NextDueDate, Status)
+        SELECT TOP (@newWordCount) @userId, w.WordID, 0, CAST(GETDATE() AS DATE), 'learning'
+        FROM Words w
+        WHERE w.UserId = @userId AND w.WordID NOT IN (
+            SELECT WordId FROM UserWords WHERE UserId = @userId
+        )
+        ORDER BY w.WordID
+    ";
 
-        command.Parameters.AddWithValue("@eng", request.EngWordName);
-        command.Parameters.AddWithValue("@tur", request.TurWordName);
-        command.Parameters.AddWithValue("@pic", request.Picture ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("@pron", request.Pronunciation ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("@uid", request.UserId);
+    using var cmd = new SqlCommand(query, conn);
+    cmd.Parameters.AddWithValue("@userId", request.UserId);
+    cmd.Parameters.AddWithValue("@newWordCount", request.NewWordCount);
 
-        var wordId = (int)await command.ExecuteScalarAsync();
+    int rowsAffected = await cmd.ExecuteNonQueryAsync();
 
-        // Örnek cümleleri ekle
-        foreach (var sample in request.Samples.Where(s => !string.IsNullOrWhiteSpace(s)))
-        {
-            var sampleCmd = new SqlCommand(@"
-                INSERT INTO WordSamples (WordId, SampleText)
-                VALUES (@wordId, @sample)", connection);
-
-            sampleCmd.Parameters.AddWithValue("@wordId", wordId);
-            sampleCmd.Parameters.AddWithValue("@sample", sample);
-            await sampleCmd.ExecuteNonQueryAsync();
-        }
-
-        return Results.Ok(new { message = "Kelime başarıyla eklendi!" });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem("Sunucu hatası: " + ex.Message);
-    }
+    return Results.Ok(new { message = $"{rowsAffected} adet yeni kelime eklendi." });
 });
 
+// 2. Tekrar edilmesi gereken kelimeleri getir
+app.MapGet("/api/userwords/due-words/{userId:int}", async (int userId) =>
+{
+    var connectionString = configuration.GetConnectionString("DefaultConnection");
 
+    using var conn = new SqlConnection(connectionString);
+    await conn.OpenAsync();
+
+    var query = @"
+        SELECT uw.Id, uw.UserId, uw.WordId, uw.CorrectStreak, uw.NextDueDate, uw.Status, 
+               w.EngWordName, w.TurWordName, w.Picture
+        FROM UserWords uw
+        JOIN Words w ON uw.WordId = w.WordID
+        WHERE uw.UserId = @userId AND uw.NextDueDate <= CAST(GETDATE() AS DATE)
+        ORDER BY uw.NextDueDate
+    ";
+
+    using var cmd = new SqlCommand(query, conn);
+    cmd.Parameters.AddWithValue("@userId", userId);
+
+    var reader = await cmd.ExecuteReaderAsync();
+
+    var dueWords = new List<UserWordDto>();
+
+    while (await reader.ReadAsync())
+    {
+        dueWords.Add(new UserWordDto
+        {
+            Id = reader.GetInt32(reader.GetOrdinal("Id")),
+            UserId = reader.GetInt32(reader.GetOrdinal("UserId")),
+            WordId = reader.GetInt32(reader.GetOrdinal("WordId")),
+            CorrectStreak = reader.GetInt32(reader.GetOrdinal("CorrectStreak")),
+            NextDueDate = reader.GetDateTime(reader.GetOrdinal("NextDueDate")),
+            Status = reader.GetString(reader.GetOrdinal("Status")),
+            EngWordName = reader.GetString(reader.GetOrdinal("EngWordName")),
+            TurWordName = reader.GetString(reader.GetOrdinal("TurWordName")),
+            Picture = reader.IsDBNull(reader.GetOrdinal("Picture")) ? null : reader.GetString(reader.GetOrdinal("Picture"))
+        });
+    }
+
+    return Results.Ok(dueWords);
+});
+//Ayarlar Endopointi
+app.MapGet("/api/user-info", async (HttpContext context) =>
+{
+    var connectionString = configuration.GetConnectionString("DefaultConnection");
+
+    using var connection = new SqlConnection(connectionString);
+    await connection.OpenAsync();
+
+    var cmd = new SqlCommand("SELECT Username, Email, JoinDate FROM Users WHERE UserId = @id", connection);
+    cmd.Parameters.AddWithValue("@id", 1); // örnek kullanıcı
+    var reader = await cmd.ExecuteReaderAsync();
+
+    if (await reader.ReadAsync())
+    {
+        var user = new
+        {
+            username = reader["Username"].ToString(),
+            email = reader["Email"].ToString(),
+            joinDate = Convert.ToDateTime(reader["JoinDate"]).ToString("yyyy-MM-dd")
+        };
+        return Results.Ok(user);
+    }
+
+    return Results.NotFound();
+});
 
 
 
 app.Run();
 
 
-// === MODELLER ===
-public class User
+// === Model Sınıfları ===
+
+public record User
 {
     public int Id { get; set; }
-    public string Username { get; set; } = string.Empty;
-    public string Email { get; set; } = string.Empty;
-    public string PasswordHash { get; set; } = string.Empty;
+    public string Username { get; set; }
+    public string Email { get; set; }
+    public string PasswordHash { get; set; }
 }
 
-public class LoginRequest
+public record LoginRequest
 {
     public string Email { get; set; }
     public string PasswordHash { get; set; }
 }
 
-public class WordDto
+public record NewWordRequest
 {
-    public string Text { get; set; }
-    public string Translation { get; set; }
+    public string EngWordName { get; set; }
+    public string TurWordName { get; set; }
+    public string Picture { get; set; }
+    public string Pronunciation { get; set; }
     public int UserId { get; set; }
+    public List<string> Samples { get; set; }
 }
 
 public class WordProgress
 {
     public int Id { get; set; }
-    public string Word { get; set; } = string.Empty;
+    public string Word { get; set; }
     public int CorrectCount { get; set; }
     public DateTime LastCorrectDate { get; set; }
 }
-public class NewWordRequest
+
+public record AddDailyNewWordsRequest(int UserId, int NewWordCount);
+
+public class UserWordDto
 {
+    public int Id { get; set; }
+    public int UserId { get; set; }
+    public int WordId { get; set; }
+    public int CorrectStreak { get; set; }
+    public DateTime NextDueDate { get; set; }
+    public string Status { get; set; }
     public string EngWordName { get; set; }
     public string TurWordName { get; set; }
     public string Picture { get; set; }
-    public string? Pronunciation { get; set; }
-    public List<string> Samples { get; set; }
-    public int UserId { get; set; }
 }

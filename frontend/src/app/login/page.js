@@ -39,6 +39,8 @@ const LoginPage = () => {
     if (response.ok) {
       const data = await response.json();
       console.log("Giriş başarılı:", data);
+      localStorage.setItem("userEmail", data.email);
+      localStorage.setItem("userName", data.username || "Kullanıcı");
       router.push("/dashboard");
     } else if (response.status === 401) {
       setErrorMessage("Geçersiz e-posta veya şifre");

@@ -94,9 +94,18 @@ app.MapPost("/api/login", async (LoginRequest request) =>
             var storedHash = result.ToString();
             var isValid = BCrypt.Net.BCrypt.Verify(request.PasswordHash, storedHash);
             if (isValid)
-                return Results.Ok(new { message = "Giriş başarılı!" });
+            {
+                var userInfoCmd = new SqlCommand("SELECT Username FROM Users WHERE Email = @Email", conn);
+                userInfoCmd.Parameters.AddWithValue("@Email", request.Email);
+                var usernameResult = await userInfoCmd.ExecuteScalarAsync();
+                string username = usernameResult?.ToString() ?? "Kullanıcı";
+
+                return Results.Ok(new { message = "Giriş başarılı!", username, email = request.Email });
+            }
             else
-               return Results.Json(new { message = "Şifre yanlış." }, statusCode: StatusCodes.Status401Unauthorized);
+            {
+                return Results.Json(new { message = "Şifre yanlış." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
         }
 
         return Results.NotFound(new { message = "Kullanıcı bulunamadı." });
@@ -233,85 +242,90 @@ app.MapGet("/api/word-progress", async (HttpContext context) =>
 
 // === 6 Adım Ezberleme Modülü ===
 
-// 1. Günlük yeni kelimeleri UserWords tablosuna ekle
-app.MapPost("/api/userwords/add-daily-new", async (AddDailyNewWordsRequest request) =>
+
+// Frontend her cevap sonrası bu endpoint'e POST atacak!
+app.MapPost("/api/userwords/answer", async ([FromBody] UserWordAnswerRequest req) =>
 {
     var connectionString = configuration.GetConnectionString("DefaultConnection");
-
     using var conn = new SqlConnection(connectionString);
     await conn.OpenAsync();
 
-    var query = @"
-        INSERT INTO UserWords (UserId, WordId, CorrectStreak, NextDueDate, Status)
-        SELECT TOP (@newWordCount) @userId, w.WordID, 0, CAST(GETDATE() AS DATE), 'learning'
-        FROM Words w
-        WHERE w.UserId = @userId AND w.WordID NOT IN (
-            SELECT WordId FROM UserWords WHERE UserId = @userId
-        )
-        ORDER BY w.WordID
-    ";
-
-    using var cmd = new SqlCommand(query, conn);
-    cmd.Parameters.AddWithValue("@userId", request.UserId);
-    cmd.Parameters.AddWithValue("@newWordCount", request.NewWordCount);
-
-    int rowsAffected = await cmd.ExecuteNonQueryAsync();
-
-    return Results.Ok(new { message = $"{rowsAffected} adet yeni kelime eklendi." });
-});
-
-// 2. Tekrar edilmesi gereken kelimeleri getir
-app.MapGet("/api/userwords/due-words/{userId:int}", async (int userId) =>
-{
-    var connectionString = configuration.GetConnectionString("DefaultConnection");
-
-    using var conn = new SqlConnection(connectionString);
-    await conn.OpenAsync();
-
-    var query = @"
-        SELECT uw.Id, uw.UserId, uw.WordId, uw.CorrectStreak, uw.NextDueDate, uw.Status, 
-               w.EngWordName, w.TurWordName, w.Picture
-        FROM UserWords uw
-        JOIN Words w ON uw.WordId = w.WordID
-        WHERE uw.UserId = @userId AND uw.NextDueDate <= CAST(GETDATE() AS DATE)
-        ORDER BY uw.NextDueDate
-    ";
-
-    using var cmd = new SqlCommand(query, conn);
-    cmd.Parameters.AddWithValue("@userId", userId);
-
+    // Kelime bilgisini çek
+    var cmd = new SqlCommand(@"
+        SELECT CorrectStreak, Status
+        FROM UserWords
+        WHERE UserId = @userId AND WordId = @wordId
+    ", conn);
+    cmd.Parameters.AddWithValue("@userId", req.UserId);
+    cmd.Parameters.AddWithValue("@wordId", req.WordId);
     var reader = await cmd.ExecuteReaderAsync();
 
-    var dueWords = new List<UserWordDto>();
+    if (!reader.HasRows) return Results.NotFound();
 
-    while (await reader.ReadAsync())
+    await reader.ReadAsync();
+    int streak = reader.GetInt32(0);
+    string status = reader.GetString(1);
+    await reader.CloseAsync();
+
+    if (status == "learned")
+        return Results.Ok(new { message = "Kelime zaten öğrenildi." });
+
+    int newStreak = req.IsCorrect ? streak + 1 : 0;
+    DateTime nextDueDate = DateTime.Today;
+    string newStatus = status;
+
+    // Aralıklı tekrar süreleri
+    var intervals = new[] { 1, 7, 30, 90, 180, 365 }; // gün cinsinden
+
+    if (req.IsCorrect)
     {
-        dueWords.Add(new UserWordDto
+        if (newStreak < 6)
+            nextDueDate = DateTime.Today.AddDays(intervals[newStreak - 1]);
+        else
         {
-            Id = reader.GetInt32(reader.GetOrdinal("Id")),
-            UserId = reader.GetInt32(reader.GetOrdinal("UserId")),
-            WordId = reader.GetInt32(reader.GetOrdinal("WordId")),
-            CorrectStreak = reader.GetInt32(reader.GetOrdinal("CorrectStreak")),
-            NextDueDate = reader.GetDateTime(reader.GetOrdinal("NextDueDate")),
-            Status = reader.GetString(reader.GetOrdinal("Status")),
-            EngWordName = reader.GetString(reader.GetOrdinal("EngWordName")),
-            TurWordName = reader.GetString(reader.GetOrdinal("TurWordName")),
-            Picture = reader.IsDBNull(reader.GetOrdinal("Picture")) ? null : reader.GetString(reader.GetOrdinal("Picture"))
-        });
+            newStatus = "learned";
+            nextDueDate = DateTime.MaxValue;
+        }
+    }
+    else
+    {
+        newStreak = 0;
+        nextDueDate = DateTime.Today;
     }
 
-    return Results.Ok(dueWords);
+    var updateCmd = new SqlCommand(@"
+        UPDATE UserWords
+        SET CorrectStreak = @streak, NextDueDate = @due, Status = @status
+        WHERE UserId = @userId AND WordId = @wordId
+    ", conn);
+    updateCmd.Parameters.AddWithValue("@streak", newStreak);
+    updateCmd.Parameters.AddWithValue("@due", nextDueDate);
+    updateCmd.Parameters.AddWithValue("@status", newStatus);
+    updateCmd.Parameters.AddWithValue("@userId", req.UserId);
+    updateCmd.Parameters.AddWithValue("@wordId", req.WordId);
+
+    await updateCmd.ExecuteNonQueryAsync();
+
+    return Results.Ok(new
+    {
+        CorrectStreak = newStreak,
+        Status = newStatus,
+        NextDueDate = nextDueDate
+    });
 });
 //Ayarlar Endopointi
 app.MapGet("/api/user-info", async (HttpContext context) =>
 {
-    var connectionString = configuration.GetConnectionString("DefaultConnection");
+    var email = context.Request.Query["email"].ToString();
+    if (string.IsNullOrEmpty(email))
+        return Results.BadRequest(new { message = "Email eksik." });
 
+    var connectionString = configuration.GetConnectionString("DefaultConnection");
     using var connection = new SqlConnection(connectionString);
     await connection.OpenAsync();
 
-    var cmd = new SqlCommand("SELECT Username, Email, JoinDate FROM Users WHERE UserId = @id", connection);
-    cmd.Parameters.AddWithValue("@id", 1); // örnek kullanıcı
+    var cmd = new SqlCommand("SELECT Username, Email FROM Users WHERE Email = @email", connection);
+    cmd.Parameters.AddWithValue("@email", email);
     var reader = await cmd.ExecuteReaderAsync();
 
     if (await reader.ReadAsync())
@@ -319,16 +333,147 @@ app.MapGet("/api/user-info", async (HttpContext context) =>
         var user = new
         {
             username = reader["Username"].ToString(),
-            email = reader["Email"].ToString(),
-            joinDate = Convert.ToDateTime(reader["JoinDate"]).ToString("yyyy-MM-dd")
+            email = reader["Email"].ToString()
         };
         return Results.Ok(user);
     }
 
-    return Results.NotFound();
+    return Results.NotFound(new { message = "Kullanıcı bulunamadı." });
 });
 
 
+app.MapGet("/api/userwords/due-words/{userId}", async (int userId, IConfiguration config) =>
+{
+    var today = DateTime.Today;
+    var result = new List<dynamic>();
+
+    using (var conn = new SqlConnection(config.GetConnectionString("DefaultConnection")))
+    {
+        await conn.OpenAsync();
+
+        var query = @"
+            SELECT uw.Id, w.WordId, w.Text, w.Translation, uw.CorrectStreak
+            FROM UserWords uw
+            INNER JOIN Words w ON uw.WordId = w.WordId
+            WHERE uw.UserId = @UserId AND uw.Status = 'learning' AND uw.NextDueDate <= @Today
+        ";
+
+        using (var cmd = new SqlCommand(query, conn))
+        {
+            cmd.Parameters.AddWithValue("@UserId", userId);
+            cmd.Parameters.AddWithValue("@Today", today);
+
+            using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    result.Add(new
+                    {
+                        Id = reader.GetInt32(0),
+                        WordId = reader.GetInt32(1),
+                        Text = reader.GetString(2),
+                        Translation = reader.GetString(3),
+                        CorrectStreak = reader.GetInt32(4)
+                    });
+                }
+            }
+        }
+    }
+    return Results.Ok(result);
+});
+
+app.MapGet("/api/quiz/today-words/{userId}", async (int userId, IConfiguration config) =>
+{
+    var today = DateTime.Today;
+    var newWordLimit = 10; // Günlük yeni kelime hedefi (frontendden parametreyle alınabilir)
+    var result = new List<dynamic>();
+
+    using (var conn = new SqlConnection(config.GetConnectionString("DefaultConnection")))
+    {
+        await conn.OpenAsync();
+
+        // 1. Tekrar zamanı GELEN (NextDueDate <= today), ama öğrenilmemiş (status != 'learned') kelimeleri çek
+        var dueWordsQuery = @"
+            SELECT w.WordID, w.EngWordName, w.TurWordName, uw.CorrectStreak, uw.Status
+            FROM UserWords uw
+            INNER JOIN Words w ON uw.WordId = w.WordId
+            WHERE uw.UserId = @UserId AND uw.Status = 'learning' AND uw.NextDueDate <= @Today
+        ";
+        var dueWords = new List<dynamic>();
+        using (var cmd = new SqlCommand(dueWordsQuery, conn))
+        {
+            cmd.Parameters.AddWithValue("@UserId", userId);
+            cmd.Parameters.AddWithValue("@Today", today);
+            using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    dueWords.Add(new
+                    {
+                        WordID = reader.GetInt32(0),
+                        EngWordName = reader.GetString(1),
+                        TurWordName = reader.GetString(2),
+                        CorrectStreak = reader.GetInt32(3),
+                        Status = reader.GetString(4)
+                    });
+                }
+            }
+        }
+
+        // 2. Yeni kelime ihtiyacı var mı, hesapla
+        int eksikYeniKelimeSayisi = newWordLimit - dueWords.Count;
+        if (eksikYeniKelimeSayisi < 0) eksikYeniKelimeSayisi = 0;
+
+        // 3. Daha önce bu kullanıcıya hiç atanmamış yeni kelimeleri çek (UserWords'te kaydı yok)
+        var newWordsQuery = $@"
+            SELECT TOP (@Limit) w.WordID, w.EngWordName, w.TurWordName
+            FROM Words w
+            LEFT JOIN UserWords uw ON uw.UserId = @UserId AND uw.WordId = w.WordId
+            WHERE uw.WordId IS NULL
+            ORDER BY NEWID() -- Rastgele
+        ";
+        var newWords = new List<dynamic>();
+        using (var cmd = new SqlCommand(newWordsQuery, conn))
+        {
+            cmd.Parameters.AddWithValue("@Limit", eksikYeniKelimeSayisi);
+            cmd.Parameters.AddWithValue("@UserId", userId);
+            using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    newWords.Add(new
+                    {
+                        WordID = reader.GetInt32(0),
+                        EngWordName = reader.GetString(1),
+                        TurWordName = reader.GetString(2),
+                        CorrectStreak = 0,
+                        Status = "new"
+                    });
+                }
+            }
+        }
+
+        // 4. Eğer yeni kelime varsa, bunları UserWords tablosuna EKLE
+        foreach (var nw in newWords)
+        {
+            var insertCmd = new SqlCommand(@"
+                INSERT INTO UserWords (UserId, WordId, CorrectStreak, NextDueDate, Status)
+                VALUES (@UserId, @WordId, 0, @NextDueDate, 'learning')
+            ", conn);
+            insertCmd.Parameters.AddWithValue("@UserId", userId);
+            insertCmd.Parameters.AddWithValue("@WordId", nw.WordID);
+            insertCmd.Parameters.AddWithValue("@NextDueDate", today); // ilk gün bugün sorulacak
+            await insertCmd.ExecuteNonQueryAsync();
+        }
+
+        // 5. Sonuç olarak, tekrar zamanı gelenler + yeni eklenen kelimeleri birleştir ve dön
+        var todayWords = new List<dynamic>();
+        todayWords.AddRange(dueWords);
+        todayWords.AddRange(newWords);
+
+        return Results.Ok(todayWords);
+    }
+});
 
 app.Run();
 
@@ -380,4 +525,10 @@ public class UserWordDto
     public string EngWordName { get; set; }
     public string TurWordName { get; set; }
     public string Picture { get; set; }
+}
+public class UserWordAnswerRequest
+{
+    public int UserId { get; set; }
+    public int WordId { get; set; }
+    public bool IsCorrect { get; set; }
 }

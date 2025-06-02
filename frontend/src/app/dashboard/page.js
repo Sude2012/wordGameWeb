@@ -11,6 +11,30 @@ export default function DashboardPage() {
     router.push("/login");
   };
 
+  const markWordAsLearned = async (wordId) => {
+    const email = localStorage.getItem("userEmail");
+
+    try {
+      const res = await fetch(
+        "http://localhost:5278/api/userwords/update-status",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email,
+            wordId,
+            status: "learned",
+          }),
+        }
+      );
+
+      const data = await res.json();
+      console.log("Durum güncellendi:", data);
+    } catch (error) {
+      console.error("Kelime durumu güncellenemedi:", error);
+    }
+  };
+
   const buttonBaseStyle = {
     width: "380px",
     height: "80px",

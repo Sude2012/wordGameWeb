@@ -41,6 +41,9 @@ const LoginPage = () => {
       console.log("Giriş başarılı:", data);
       localStorage.setItem("userEmail", data.email);
       localStorage.setItem("userName", data.username || "Kullanıcı");
+      if (data.userId) {
+        localStorage.setItem("userId", data.userId);
+      }
       router.push("/dashboard");
     } else if (response.status === 401) {
       setErrorMessage("Geçersiz e-posta veya şifre");
@@ -54,7 +57,7 @@ const LoginPage = () => {
     <div className="container">
       <div className="form-container">
         <h1>Giriş Yap</h1>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className="login-form">
           <div className="input-group">
             <label htmlFor="email">E-posta</label>
             <input
@@ -79,14 +82,35 @@ const LoginPage = () => {
 
           {errorMessage && <p className="error-message">{errorMessage}</p>}
 
-          <button type="submit" className="btn">
+          <button type="submit" className="login-btn">
             Giriş Yap
           </button>
         </form>
 
-        <p>
-          Hesabınız yok mu? <Link href="/signup">Kaydol</Link>
-        </p>
+        <div style={{ textAlign: "center", marginTop: 12 }}>
+          <a
+            href="/reset-password"
+            style={{
+              fontSize: "0.97rem",
+              color: "#2563eb",
+              textDecoration: "none",
+              marginBottom: 8,
+              display: "inline-block",
+              transition: "text-decoration 0.2s",
+            }}
+            onMouseOver={(e) => (e.target.style.textDecoration = "underline")}
+            onMouseOut={(e) => (e.target.style.textDecoration = "none")}
+          >
+            Şifremi Unuttum?
+          </a>
+        </div>
+
+        <div style={{ textAlign: "center", marginTop: 8 }}>
+          Hesabınız yok mu?{" "}
+          <a href="/signup" style={{ color: "#7c3aed" }}>
+            Kaydol
+          </a>
+        </div>
       </div>
 
       <style jsx>{`
@@ -133,7 +157,7 @@ const LoginPage = () => {
           font-size: 1rem;
         }
 
-        .btn {
+        .login-btn {
           width: 100%;
           background-color: #4caf50;
           color: white;
@@ -145,18 +169,8 @@ const LoginPage = () => {
           transition: background-color 0.3s ease;
         }
 
-        .btn:hover {
+        .login-btn:hover {
           background-color: #45a049;
-        }
-
-        p {
-          margin-top: 20px;
-          font-size: 0.9rem;
-        }
-
-        a {
-          color: #4caf50;
-          text-decoration: underline;
         }
 
         .error-message {

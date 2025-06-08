@@ -77,7 +77,8 @@ export default function DashboardPage() {
 
   const buttons = [
     { href: "/quiz", label: "🎮 Teste Başla", id: 1 },
-    { href: "/dashboard/settings", label: "⚙️ Ayarlar", id: 2 }, // 🔁 YÖNLENDİRME DÜZELTİLDİ
+    { href: "/dashboard/settings", label: "⚙️ Ayarlar", id: 2 },
+    { href: "/exam", label: "📝 Sınav Modülü", id: 4 },
   ];
 
   return (

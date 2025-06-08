@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 // === MASALSI STORYBOOK AI GÖRSEL PROMPTU ===
 function WordChainStory({ words = [] }) {
@@ -236,6 +237,8 @@ export default function Quiz() {
   // Kullanıcı id'si (şimdilik sabit)
   const userId = 1;
 
+  const router = useRouter();
+
   // Kelimeleri çek ve kullanıcı bilgisini al
   useEffect(() => {
     const email = localStorage.getItem("userEmail");
@@ -285,7 +288,7 @@ export default function Quiz() {
   async function submitAnswer(isCorrect) {
     if (!currentWord) return;
     const wordId = currentWord.id;
-    const response = await fetch("http://localhost:5278/api/userwords/answer", {
+    const response = await fetch("http://localhost:5278/api/exam/answer", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, wordId, isCorrect }),
@@ -387,6 +390,8 @@ export default function Quiz() {
         }
         .container { max-width: 520px; margin: 40px auto; padding: 30px 25px; background-color: rgba(255 255 255 / 0.9);
           border-radius: 16px; box-shadow: 0 15px 25px rgba(0,0,0,0.15); text-align: center; position: relative; animation: fadeIn 1s ease forwards;}
+        .back-btn { position: absolute; left: 24px; top: 24px; background: #2563eb; color: white; border: none; border-radius: 8px; padding: 10px 22px; font-size: 1rem; font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(37,99,235,0.15); transition: background 0.2s, transform 0.2s; z-index: 2;}
+        .back-btn:hover { background: #1d4ed8; transform: scale(1.05); }
         h1 { margin-bottom: 30px; font-weight: 700; font-size: 2rem; color: #34495e; letter-spacing: 1.3px; text-shadow: 1px 1px 4px #a3b1c6;}
         label { font-weight: 600; font-size: 1rem; display: inline-flex; align-items: center; gap: 10px; margin-bottom: 20px; color: #34495e;}
         input[type="number"] { width: 60px; padding: 6px 10px; border-radius: 8px; border: 2px solid #3498db; font-weight: 600; font-size: 1rem; transition: border-color 0.3s ease;}
@@ -432,6 +437,9 @@ export default function Quiz() {
         }
       `}</style>
       <div className="container">
+        <button className="back-btn" onClick={() => router.push("/dashboard")}>
+          ← Geri
+        </button>
         <h1>Quiz Ekranı</h1>
         {userName && (
           <p

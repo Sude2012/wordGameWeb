@@ -184,7 +184,7 @@ export default function SettingsPage() {
       </div>
 
       <div className={styles.card}>
-        <h2>❌ Bilinmeyen Kelimeler</h2>
+        <h2>Bugünkü Bildiğiniz Kelimeler</h2>
         <p>
           <strong>Toplam:</strong> {stats.unknownWords} kelime
         </p>
@@ -207,7 +207,7 @@ export default function SettingsPage() {
       <div className={styles.card} ref={reportRef}>
         <h2>📈 Başarı Analiz Raporu</h2>
         {analysisReport.length === 0 ? (
-          <p>Yeterli veri yok.</p>
+          <p>Bildiğiniz kelimeler çıkarılacak</p>
         ) : (
           <table
             style={{ width: "100%", borderCollapse: "collapse", marginTop: 12 }}

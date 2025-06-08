@@ -101,6 +101,13 @@ export default function SettingsPage() {
     win.print();
   };
 
+  // Sınavda çıkan bilinmeyen kelimeler
+  let examUnknownWords = [];
+  try {
+    const examWords = JSON.parse(typeof window !== 'undefined' ? localStorage.getItem("examWords") : "null") || [];
+    examUnknownWords = examWords.filter((w) => w.status !== "learned");
+  } catch (e) { examUnknownWords = []; }
+
   return (
     <div className={styles.container}>
       <style>{`
@@ -163,7 +170,7 @@ export default function SettingsPage() {
       </div>
 
       <div className={styles.card}>
-        <h2>✅ Bilinen Kelimeler</h2>
+        <h2>🎓 Öğrenilen Kelimeler</h2>
         <p>
           <strong>Toplam:</strong> {stats.knownWords} kelime
         </p>
@@ -179,12 +186,12 @@ export default function SettingsPage() {
               ))}
           </ul>
         ) : (
-          <p>Henüz bilinen kelime yok.</p>
+          <p>Henüz öğrenilen kelime yok.</p>
         )}
       </div>
 
       <div className={styles.card}>
-        <h2>Bugünkü Bildiğiniz Kelimeler</h2>
+        <h2>❓ Bilinmeyen Kelimeler</h2>
         <p>
           <strong>Toplam:</strong> {stats.unknownWords} kelime
         </p>
@@ -200,7 +207,26 @@ export default function SettingsPage() {
               ))}
           </ul>
         ) : (
-          <p>Henüz bilinmeyen kelime yok.</p>
+          <p>Tebrikler! Bilinmeyen kelimeniz yok.</p>
+        )}
+      </div>
+
+      {/* Sınavda çıkan bilinmeyen kelimeler */}
+      <div className={styles.card}>
+        <h2>📝 Sınavda Sorulan Bilinmeyen Kelimeler</h2>
+        <p>
+          <strong>Toplam:</strong> {examUnknownWords.length} kelime
+        </p>
+        {examUnknownWords.length > 0 ? (
+          <ul>
+            {examUnknownWords.map((w, index) => (
+              <li key={index}>
+                {w.EngWordName || w.engWordName || w.eng} - {w.TurWordName || w.turWordName || w.tur}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>Bugünkü sınavda bilinmeyen kelime yok.</p>
         )}
       </div>
 

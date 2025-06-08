@@ -83,6 +83,7 @@ export default function ExamPage() {
         }
         const data = await res.json();
         setWords(data);
+        localStorage.setItem("examWords", JSON.stringify(data));
       } catch (err) {
         setError("Sunucuya bağlanılamadı veya ağ hatası oluştu.");
       }

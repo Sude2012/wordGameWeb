@@ -209,6 +209,19 @@ function WordChainStory({ words = [] }) {
   );
 }
 
+// --- Dizi karıştırma fonksiyonu ---
+function shuffle(array) {
+  let currentIndex = array.length, randomIndex;
+  while (currentIndex !== 0) {
+    randomIndex = Math.floor(Math.random() * currentIndex);
+    currentIndex--;
+    [array[currentIndex], array[randomIndex]] = [
+      array[randomIndex], array[currentIndex],
+    ];
+  }
+  return array;
+}
+
 // === ANA QUIZ BİLEŞENİ ===
 export default function Quiz() {
   const [words, setWords] = useState([]);
@@ -248,7 +261,7 @@ export default function Quiz() {
 
     fetch("http://localhost:5278/api/words")
       .then((res) => res.json())
-      .then((data) => setWords(data))
+      .then((data) => setWords(shuffle(data)))
       .catch((err) => console.error("Kelime yüklenirken hata:", err));
   }, []);
 
@@ -300,6 +313,15 @@ export default function Quiz() {
     const data = await response.json();
     if (data.Status === "learned") {
       setFeedback("👏 6 adım tamamlandı, bu kelimeyi artık biliyorsun!");
+      await fetch("http://localhost:5278/api/userwords/update-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: userEmail,
+          wordId: wordId,
+          status: "learned"
+        })
+      });
     } else if (isCorrect) {
       setFeedback(`✅ Doğru! (Doğru üst üste: ${data.CorrectStreak}/6)`);
     } else {
